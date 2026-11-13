@@ -26,10 +26,14 @@ jobs:
         uses: actions/checkout@v4
       - name: Configure Pages
         uses: actions/configure-pages@v5
+      - name: Prepare static app only
+        run: |
+          mkdir -p dist
+          cp index.html MahiDrive.html mahidrive-config.js mahidrive-app.js dist/
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: dist
       - name: Deploy Pages
         id: deployment
         uses: actions/deploy-pages@v4
