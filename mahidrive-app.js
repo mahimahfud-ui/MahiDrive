@@ -38,7 +38,8 @@ async function files(){
  if(S.cwd&&!F.some(f=>f.id===S.cwd&&f.t==="folder"))S.cwd=null;
  if(r.accountErrors?.length)toast("Some connected accounts could not sync.");
 }
-async function refreshAll(){await accounts();await files();await accounts();syncSq();draw();}
+async function loadActivity(){const r=await call("activity");ACT.splice(0,ACT.length,...(r.events||[]).map(e=>{const names={google_oauth_started:"Google sign-in started",google_account_connected:"Google Drive account connected",google_account_disconnected:"Google Drive account disconnected",folder_created:"Folder created",file_uploaded:"File uploaded",file_renamed:"File renamed",file_moved:"File moved",file_copied:"File copied",file_trashed:"File moved to trash",file_restored:"File restored",file_deleted_permanently:"File permanently deleted",file_starred:"File starred",file_unstarred:"File unstarred"};const k=e.action||"mod";const t=k.indexOf("upload")>=0?"up":k.indexOf("deleted")>=0||k.indexOf("trashed")>=0?"del":k.indexOf("connected")>=0||k.indexOf("oauth")>=0?"sync":"mod";return[t,names[k]||k.replaceAll("_"," "),new Date(e.created_at).toLocaleString()];}));}
+async function refreshAll(){await accounts();await files();await accounts();await loadActivity();syncSq();draw();}
 function syncSq(){const u=A.reduce((s,a)=>s+a.u,0),c=A.reduce((s,a)=>s+a.q,0);if(el("sqt"))el("sqt").textContent=u.toFixed(2)+" GB";if(el("sqc"))el("sqc").textContent=c?c.toFixed(2)+" GB":"—";if(el("sqb"))el("sqb").style.width=c?Math.min(100,u/c*100)+"%":"0%";const n=document.querySelector(".sq .mu");if(n?.childNodes[0])n.childNodes[0].textContent="Live · ";}
 function H(t,s,a){return hd(t,s,a||"");}
 V.dash=()=>{const u=A.reduce((s,a)=>s+a.u,0),c=A.reduce((s,a)=>s+a.q,0),online=A.filter(a=>a.status==="connected").length,p=c?Math.round(u/c*100):0,recent=F.filter(f=>!f.tr&&f.t!=="folder").sort((a,b)=>a.d-b.d).slice(0,5);
@@ -58,7 +59,10 @@ V.settings=()=>H("Settings","Backend and account.")+"<div class='cd'><div class=
 window.refreshAll=refreshAll;window.syncSq=syncSq;
 window.connectSlot=async slot=>{try{const r=await call("oauth/start",{method:"POST",body:{slot}});location.assign(r.authorizationUrl);}catch(e){toast(say(e));}};
 window.disconnectSlot=slot=>ask("Disconnect Google Drive "+slot+"?","The OAuth token will be revoked and removed. Files stored in Google Drive will not be deleted.",async()=>{try{await call("accounts/disconnect",{method:"POST",body:{slot}});await refreshAll();toast("Google Drive disconnected.");}catch(e){toast(say(e));}},"Disconnect");
-window.browseSlot=slot=>{S.cwd=null;go("files");draw();};
+window.browseSlot=slot=>{const a=A.find(x=>x.slot===slot);S.cwd=null;S.accountFilter=a?.id||null;window.__mdBrowse=true;originalGo("files");};
+const originalItems=window.items,originalGo=window.go;
+window.items=()=>{const list=originalItems();return S.accountFilter?list.filter(f=>f.accountId===S.accountFilter):list;};
+window.go=v=>{if(v==="files"&&!window.__mdBrowse)S.accountFilter=null;window.__mdBrowse=false;originalGo(v);};
 window.ownerSignOut=async()=>{await sb.auth.signOut();location.reload();};
 window.addAcct=()=>{const a=A.find(x=>x.status!=="connected");if(a)connectSlot(a.slot);else toast("All five Google Drive slots are connected.");};
 window.newFolder=()=>{const active=A.filter(a=>a.status==="connected");if(!active.length)return toast("Connect Google Drive first.");modal("<h3>Create Google Drive folder</h3><label class='mu'>Account</label><select id='md-folder-account' style='width:100%'>"+active.map(a=>"<option value='"+esc(a.id)+"'>"+esc(a.n)+" · "+esc(a.email)+"</option>").join("")+"</select><label class='mu'>Folder name</label><input id='md-folder-name' type='text' placeholder='New folder'><div class='ac'><button class='b' onclick='closeM()'>Cancel</button><button class='b p' id='md-folder-create'>Create folder</button></div>");el("md-folder-create").onclick=async()=>{const accountId=el("md-folder-account").value,name=el("md-folder-name").value.trim(),folder=S.cwd?gf(S.cwd):null,parentId=folder?.accountId===accountId?folder.remoteId:null;if(!name)return toast("Enter a folder name.");try{await call("files/create-folder",{method:"POST",body:{accountId,name,parentId}});closeM();await files();go("files");toast("Folder created.");}catch(e){toast(say(e));}};};
@@ -101,7 +105,7 @@ async function boot(){
   const {data,error}=await sb.auth.getSession();if(error)throw error;session=data.session;if(!session)return;
   const health=await call("health");if(!health.ok||String(health.owner||"").toLowerCase()!==C.ownerEmail.toLowerCase())throw new Error("This sign-in is not authorized as the MahiDrive Owner.");
   el("md-auth")?.remove();el("app").style.display="";
-  U.splice(0,U.length);ACT.splice(0,ACT.length);await accounts();await files();await accounts();syncSq();draw();
+  U.splice(0,U.length);ACT.splice(0,ACT.length);await accounts();await files();await accounts();await loadActivity();syncSq();draw();
   const qp=new URLSearchParams(location.search),result=qp.get("mahidrive_oauth"),slot=qp.get("slot");if(result)history.replaceState({},document.title,location.origin+location.pathname+location.hash);
   if(result==="connected")toast("Google Drive slot "+slot+" connected.");else if(result==="error")toast("Google authorization was cancelled or failed.");
   booted=true;
