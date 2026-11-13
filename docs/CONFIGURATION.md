@@ -1,63 +1,82 @@
 # MahiDrive configuration checklist
 
-This document separates repository setup from provisioning external services. No secret values belong in Git.
+MahiDrive's dedicated Supabase backend has been provisioned. No Mahi-Repair or MahiCloud project is used.
 
-## A. GitHub repository
+## 1. Project and owner
 
-1. Open the repository Settings.
-2. Change visibility from Public to **Private** before adding private implementation details.
-3. Keep `.env.example` tracked; keep `.env.local` and all real credentials untracked.
-4. Protect `main` and use pull requests for implementation work.
+- Supabase project ref: `ymfsjqobgefiagenaibi`
+- Region: Mumbai (`ap-south-1`)
+- Project URL: https://ymfsjqobgefiagenaibi.supabase.co
+- Owner: `mahimahfud@gmail.com`
+- Edge Function: `mahidrive-api`, deployed and active (version 4)
+- Database: private `mahidrive` schema; all six tables have RLS enabled; `anon` and `authenticated` have no table access. Server-side function uses the injected Supabase secret key.
 
-Repository settings: https://github.com/mahimahfud-ui/MahiDrive/settings
+## 2. Serve the HTML
 
-## B. Supabase
+Serve these files from the same HTTPS origin:
 
-MahiDrive needs its own Supabase project. It must not use the Mahi-Repair project or the MahiCloud database.
+- `MahiDrive.html`
+- `mahidrive-config.js`
+- `mahidrive-app.js`
 
-The currently connected Supabase accounts do not show a project named MahiDrive. Before creating one, select the Supabase organization and review the quoted cost. Configure Auth for one owner only, and apply the schema/RLS through reviewed migrations. Do not enable anonymous sign-in or public registration.
+The HTML loads Supabase JS v2.119.0 and the two local scripts. Enable GitHub Pages or deploy the three files to a static HTTPS host. Then add the exact origin/page to Supabase Auth URL Configuration / Redirect URLs.
 
-Supabase dashboard: https://supabase.com/dashboard
+Supabase Dashboard: https://supabase.com/dashboard/project/ymfsjqobgefiagenaibi
 
-## C. Google Cloud
+## 3. Add Supabase Edge Function secrets
 
-1. Create/select a Google Cloud project dedicated to MahiDrive.
-2. Enable the Google Drive API.
-3. Configure the OAuth consent screen and authorized domains.
-4. Create a Web application OAuth client.
-5. Add the exact local and production callback URLs. The local template is `http://localhost:3000/api/google/oauth/callback`.
-6. Begin with the narrow `drive.file` access mode and a Picker-based workflow.
-7. Request broader Drive scopes only after reviewing the restricted-scope verification and security-assessment requirements.
+Open https://supabase.com/dashboard/project/ymfsjqobgefiagenaibi/functions/secrets and add:
 
-Google Cloud Console: https://console.cloud.google.com/
+| Secret name | Value |
+|---|---|
+| `GOOGLE_CLIENT_ID` | OAuth Web application client ID from Google Cloud |
+| `GOOGLE_CLIENT_SECRET` | OAuth Web application client secret |
+| `GOOGLE_REDIRECT_URI` | `https://ymfsjqobgefiagenaibi.supabase.co/functions/v1/mahidrive-api/oauth/callback` |
+| `MAHIDRIVE_OAUTH_STATE_SECRET` | Random secret, at least 32 characters (generate with `openssl rand -hex 32`) |
+| `MAHIDRIVE_TOKEN_ENCRYPTION_KEY` | Base64 encoding of exactly 32 random bytes (generate with `openssl rand -base64 32`) |
 
-## D. Local environment
+Supabase injects its project URL and server secret-key environment into Edge Functions. Do not put those secrets into `mahidrive-config.js`, the browser, or Git.
 
-1. Copy `.env.example` to `.env.local`.
-2. Fill the Supabase URL and publishable key from the dedicated MahiDrive project.
-3. Add the Supabase secret key only to the server environment.
-4. Add the Google OAuth client ID, client secret and exact callback URL.
-5. Generate a 32-byte token encryption key with:
+## 4. Create the Google OAuth client
 
-   ```bash
-   openssl rand -base64 32
-   ```
+1. Open https://console.cloud.google.com/ and create/select a dedicated MahiDrive project.
+2. Enable **Google Drive API**.
+3. Configure the OAuth consent screen and add `mahimahfud@gmail.com` as a test user while the app is in Testing.
+4. Create an OAuth Client ID with application type **Web application**.
+5. Add this exact Authorized redirect URI:
 
-6. Keep the encryption key in a secret manager. Do not paste it into chat, source code, GitHub Actions logs, or a committed file.
+   `https://ymfsjqobgefiagenaibi.supabase.co/functions/v1/mahidrive-api/oauth/callback`
 
-## E. Five-account setup
+6. Copy its Client ID and Client Secret into the Supabase Edge Function secrets above.
+7. Start with `openid`, `email`, `profile`, and `https://www.googleapis.com/auth/drive.file`.
 
-- Connect accounts one at a time using the owner session.
-- Record Google subject ID and verified email returned by Google; do not identify accounts only by their display label.
-- Pull quota from each account's Drive API response.
-- Keep each refresh token isolated and encrypted.
-- Allow fewer than five accounts; the app must still work with one connected account.
-- Do not claim the target total is 75 GB until live quota values have been read.
+The current app intentionally uses `drive.file`: MahiDrive can access files it creates or files explicitly selected/opened by the owner. Google Picker integration has not yet been added, so files already in Drive may not appear. Do not advertise full-drive access with this scope.
 
-## F. Deployment
+Broader Drive access scopes can be restricted and may require Google verification and a security assessment. Review Google's current scope requirements before requesting them.
 
-Set production environment variables in the hosting provider's secret settings. Configure the production OAuth callback URL and Supabase Auth redirect allowlist to match the deployed domain exactly. Use HTTPS. Do not enable production Google connections until owner authentication, token encryption, RLS, callback validation, and backup/restore behavior have been tested.
+## 5. Supabase Auth URL and sign-in
 
-## Not configured by this repository change
+- Keep the existing confirmed Owner user `mahimahfud@gmail.com`.
+- The HTML sends an email magic link with `shouldCreateUser: false`; no sign-up flow is offered in the app.
+- Add the deployed static page URL to Supabase Auth URL Configuration / Redirect URLs.
+- Confirm the Email provider is enabled.
+- Every API call validates the user session and matches its user ID and email to the single Owner record. A signed-in non-owner is rejected.
 
-No Supabase project has been created or modified, no Google OAuth client exists yet, and no accounts have been connected. The current HTML prototype remains demo-only.
+If Supabase's project-wide signup setting is still enabled, disable public sign-ups in Authentication settings as an additional safeguard. The API owner check remains mandatory regardless.
+
+## 6. What is connected and what is pending
+
+Already provisioned and deployed:
+- Owner record and verified Supabase Auth identity.
+- Private database schema, five disconnected Google account slots and owner-only Edge Function API.
+- HTML client files wired to Supabase Auth and API routes.
+- Server-side token encryption code, Google OAuth callback and resumable upload proxy.
+
+Pending until secrets are added and OAuth is tested:
+- Real Google account consent and all five account connections.
+- Google Picker for explicitly selecting existing Drive files.
+- Cross-account copy/verify/delete transfer workflow.
+- Google Workspace document export/preview and encrypted private vault.
+- Production hosting and end-to-end smoke tests for sign-in, upload, download, retry and account revocation.
+
+Do not store important files until real Google OAuth and transfer tests pass.
