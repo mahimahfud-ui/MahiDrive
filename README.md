@@ -1,48 +1,65 @@
 # MahiDrive
 
-**MahiDrive** is a private, single-owner cloud file manager designed to present up to five separately authenticated Google Drive accounts through one interface.
+**MahiDrive** is a private, single-owner storage console for up to five independent Google Drive accounts.
 
-## Project goals
+## Dedicated backend provisioned
 
-- One owner account; no public registration, guest access, teams, or public sharing.
-- Up to five independent Google Drive connections.
-- One searchable file index across connected accounts, while every file remains stored in its original Google account.
-- Live quota reporting from Google Drive, not a hard-coded 75 GB pool.
-- Safe uploads, downloads, previews, account health checks, and recoverable operations.
-- Server-side OAuth and encrypted refresh-token storage.
+- Supabase project: `MahiDrive` — `ymfsjqobgefiagenaibi` (Mumbai, `ap-south-1`)
+- Owner identity: `mahimahfud@gmail.com` (Supabase Auth user confirmed and linked)
+- Private database schema: `mahidrive`, with RLS enabled and browser roles denied direct table access
+- Five Google Drive connection slots are pre-created and currently disconnected
+- Owner-only Supabase Edge Function: `mahidrive-api` (deployed version 4)
 
-## Current repository status
+MahiDrive is separate from Mahi-Repair and MahiCloud.
 
-- `MahiDrive.html` is the existing UI prototype and is intentionally preserved.
-- The prototype itself states that it uses demo data and has no backend, sync, or OAuth. Its simulated uploads and account cards must not be treated as real cloud operations.
-- The foundation configuration and architecture are being documented before connecting real services.
+## HTML application
 
-## Architecture direction
+`MahiDrive.html` keeps the existing responsive UI and loads:
 
-- Web application: Next.js + TypeScript (server-side routes for privileged operations).
-- Identity and metadata: a **dedicated MahiDrive Supabase project**, separate from Mahi-Repair and MahiCloud databases.
-- File bytes: the five independently connected Google Drive accounts.
-- OAuth refresh tokens: encrypted server-side; never exposed to browser JavaScript.
-- Database: owner-scoped records with Row Level Security (RLS).
+- `mahidrive-config.js` — public Supabase URL, publishable key and owner email
+- `mahidrive-app.js` — owner sign-in, API client, live account/quota screens, file index, folder operations and resumable uploads
+- Supabase JS v2.119.0 from a pinned CDN version
 
-## Important storage model
+The browser contains only a Supabase **publishable** key. Supabase secret/service-role keys and Google OAuth tokens are never placed in HTML or JavaScript shipped to browsers.
 
-Five Google accounts do not become one native Google Drive quota. MahiDrive will aggregate their available capacity in its own interface and keep a permanent account reference for each file. The app must retrieve quota values from each account and calculate the total dynamically. A 5 × 15 GB figure is only an estimate, not a guaranteed quota.
+## Current integrated features
 
-## Security
+- Owner-only email magic-link sign-in. The API independently checks the authenticated Supabase user against the single Owner record.
+- Five Google Drive slots, with live per-account quota retrieval.
+- Server-side Google OAuth authorization-code callback and AES-256-GCM refresh-token encryption.
+- File/folder listing for files visible under the granted Google scope.
+- Create folder, resumable upload, download, rename, copy, move within one Drive, star/unstar, trash, restore and permanent delete.
+- Owner audit events and per-account connection status.
 
-**Do not commit credentials, OAuth tokens, service keys, encryption keys, or real account details.** Copy `.env.example` to a local environment file and configure deployment secrets through the hosting provider.
+## Google OAuth setup still required
 
-The repository is currently public. Change it to **Private** in GitHub repository Settings before adding any private implementation details or operational configuration.
+Google connections will not work until the following Edge Function secrets are entered in the Supabase Dashboard:
 
-## Documentation
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_REDIRECT_URI`
+- `MAHIDRIVE_OAUTH_STATE_SECRET`
+- `MAHIDRIVE_TOKEN_ENCRYPTION_KEY`
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [Configuration checklist](docs/CONFIGURATION.md)
-- [Security baseline](docs/SECURITY.md)
-- [Implementation roadmap](docs/ROADMAP.md)
-- [Five-account template](config/storage-accounts.example.json)
+The exact callback URI is:
 
-## Not production-ready yet
+`https://ymfsjqobgefiagenaibi.supabase.co/functions/v1/mahidrive-api/oauth/callback`
 
-No Google account is connected, no Supabase database has been provisioned for MahiDrive, and no real upload, download, sync, or owner-auth flow has been verified. Do not store important files in the current prototype.
+See [Configuration](docs/CONFIGURATION.md) for the Google Cloud and Supabase setup steps. Do not commit secret values.
+
+## Important scope and feature boundaries
+
+- The current OAuth scope is `drive.file`. It does not provide unrestricted browsing of every existing file in a Google Drive. It allows access to files created by MahiDrive or explicitly selected/opened by the owner. Google Picker integration is still pending.
+- Full Drive access needs broader Google Drive scopes; Google classifies relevant scopes as restricted and may require app verification and a security assessment.
+- Google Docs, Sheets and Slides export/preview is not implemented in this first integration.
+- Cross-account transfer with copy/verify/delete recovery is not implemented yet.
+- The prototype's PIN vault is disabled; it did not encrypt files. A real encrypted vault is not available yet.
+- Public sharing, guest access, teams and multi-tenant accounts are intentionally disabled.
+
+## Deploying the HTML
+
+The repository currently contains the static HTML client. Serve `MahiDrive.html`, `mahidrive-config.js` and `mahidrive-app.js` from the same HTTPS origin. Configure that exact origin/page in Supabase Auth's URL Configuration / Redirect URLs. GitHub Pages hosting must be enabled for the repository before a Pages URL can be used.
+
+## Not yet production-ready
+
+Google OAuth secrets have not been configured, no Google Drive account has completed OAuth, and end-to-end upload/download flows have not yet been tested against a real Google account. Do not store important files until the remaining setup and smoke tests are complete.
