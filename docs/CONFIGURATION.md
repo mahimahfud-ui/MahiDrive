@@ -8,12 +8,12 @@ MahiDrive's dedicated Supabase backend has been provisioned. No Mahi-Repair or M
 - Region: Mumbai (`ap-south-1`)
 - Project URL: https://ymfsjqobgefiagenaibi.supabase.co
 - Owner: `mahimahfud@gmail.com`
-- Edge Function: `mahidrive-api`, deployed and active (version 4)
+- Edge Function: `mahidrive-api`, deployed and active (version 5)
 - Database: private `mahidrive` schema; all six tables have RLS enabled; `anon` and `authenticated` have no table access. Server-side function uses the injected Supabase secret key.
 
 ## 2. Serve the HTML
 
-Serve these files from the same HTTPS origin:
+Serve these files from the same HTTPS origin. With this repository's GitHub Pages project site, the expected page URL is `https://mahimahfud-ui.github.io/MahiDrive/MahiDrive.html` once Pages is enabled. Add that exact page URL to Supabase Auth URL Configuration / Redirect URLs.\n\nServe these files:
 
 - `MahiDrive.html`
 - `mahidrive-config.js`
