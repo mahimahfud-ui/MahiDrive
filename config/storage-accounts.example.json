@@ -1,0 +1,28 @@
+{
+  "provider": "google-drive",
+  "maxConnectedAccounts": 5,
+  "minimumConnectedAccounts": 1,
+  "quotaSource": "Google Drive API about.get storageQuota",
+  "quotaIsDynamic": true,
+  "planningEstimatePerAccountGb": 15,
+  "planningEstimateTotalGb": 75,
+  "note": "Planning estimates only. Live quota values from Google Drive are authoritative; the five accounts remain separate storage destinations.",
+  "allocation": {
+    "strategy": "largest-available-space-that-fits",
+    "requireQuotaHeadroom": true,
+    "verifyUploadBeforeSuccess": true,
+    "useResumableUploadsForLargeFiles": true
+  },
+  "privacy": {
+    "ownerOnly": true,
+    "publicSharingEnabled": false,
+    "createPublicLinks": false
+  },
+  "accounts": [
+    { "slot": 1, "label": "Google Drive 1", "enabled": true },
+    { "slot": 2, "label": "Google Drive 2", "enabled": true },
+    { "slot": 3, "label": "Google Drive 3", "enabled": true },
+    { "slot": 4, "label": "Google Drive 4", "enabled": true },
+    { "slot": 5, "label": "Google Drive 5", "enabled": true }
+  ]
+}

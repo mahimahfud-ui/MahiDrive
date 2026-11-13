@@ -1,0 +1,133 @@
+(() => {
+"use strict";
+const C=window.MAHIDRIVE_CONFIG, BASE=C.supabaseUrl.replace(/\/+$/,""), API=BASE+"/functions/v1/"+C.edgeFunction;
+const sb=window.supabase.createClient(BASE,C.publishableKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce"}});
+let session=null,authSession=null,booted=false,booting=false,busy=false;
+const el=id=>document.getElementById(id), esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const gb=n=>Number(n||0)/(1024**3), age=d=>Math.max(0,(Date.now()-new Date(d||Date.now()).getTime())/86400000);
+const type=(m,n)=>m==="application/vnd.google-apps.folder"?"folder":/^image\//i.test(m)||/\.(jpe?g|png|gif|webp|heic)$/i.test(n)?"img":/^video\//i.test(m)||/\.(mp4|mov|mkv|webm)$/i.test(n)?"vid":/^audio\//i.test(m)||/\.(mp3|wav|flac|m4a)$/i.test(n)?"aud":m==="application/pdf"||/\.pdf$/i.test(n)?"pdf":/spreadsheet|excel|csv/i.test(m)||/\.(xlsx?|csv)$/i.test(n)?"xls":/presentation|powerpoint/i.test(m)||/\.(pptx?)$/i.test(n)?"ppt":/wordprocessing|msword/i.test(m)||/\.(docx?)$/i.test(n)?"doc":/zip|compressed/i.test(m)||/\.(zip|rar|7z)$/i.test(n)?"zip":/javascript|json|text\/|xml/i.test(m)||/\.(js|ts|py|html|css|md|txt|json)$/i.test(n)?"code":"oth";
+function say(e){return e?.message||"Request failed. Please try again."}
+function gate(message){
+ const app=el("app");if(app)app.style.display="none";
+ let n=el("md-auth");
+ if(!n){n=document.createElement("section");n.id="md-auth";
+ n.innerHTML="<style>#md-auth{position:fixed;inset:0;z-index:99999;display:grid;place-items:center;padding:20px;background:radial-gradient(800px 500px at 80% 0,rgba(124,92,255,.22),transparent),#08080c;color:#f5f5fa;font:14px/1.5 Inter,system-ui}#md-auth .card{width:min(440px,100%);padding:28px;border:1px solid #30303b;border-radius:22px;background:#14141b;box-shadow:0 24px 80px #0008}#md-auth .logo{width:42px;height:42px;border-radius:13px;background:linear-gradient(135deg,#7c5cff,#2fd4e0);display:grid;place-items:center;font-size:21px;font-weight:800;margin-bottom:22px}#md-auth h1{font-size:25px;margin:0 0 6px}#md-auth p{color:#a2a2b0;margin:4px 0 18px}#md-auth label{display:block;color:#c8c8d3;margin:14px 0 6px}#md-auth input{width:100%;height:46px;padding:0 13px;border-radius:11px;border:1px solid #3b3b48;background:#0e0e14;color:#fff;font:inherit}#md-auth button{width:100%;height:46px;margin-top:16px;border:0;border-radius:11px;background:linear-gradient(135deg,#7c5cff,#4f8cff);color:white;font:600 14px Inter;cursor:pointer}#md-auth button:disabled{opacity:.5}#md-auth .err{color:#ff9298;min-height:20px;font-size:12px}#md-auth .foot{font-size:12px;margin-top:14px;color:#898998}</style><div class='card'><div class='logo'>M</div><h1>Welcome to MahiDrive</h1><p>Private cloud storage · Owner access only</p><form id='md-login'><label>Owner email</label><input id='md-email' type='email' readonly required><button id='md-login-btn'>Send secure sign-in link</button><div class='err' id='md-auth-error' role='status'></div></form><div class='foot'>Only the configured Owner account can enter. This app does not provide a public signup flow.</div></div>";
+ document.body.append(n);el("md-email").value=C.ownerEmail;
+ el("md-login").addEventListener("submit",async ev=>{ev.preventDefault();if(busy)return;busy=true;const b=el("md-login-btn");b.disabled=true;b.textContent="Sending sign-in link…";el("md-auth-error").textContent="";
+ try{const email=el("md-email").value.trim().toLowerCase();if(email!==C.ownerEmail.toLowerCase())throw new Error("This is not the configured Owner.");const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:"https://mahidrive-ui.onrender.com/MahiDrive.html",shouldCreateUser:false}});if(error)throw error;el("md-auth-error").textContent="Sign-in link sent. Open your email and return here.";b.textContent="Link sent";}
+ catch(e){el("md-auth-error").textContent=say(e);b.disabled=false;b.textContent="Send secure sign-in link";}finally{busy=false;}});
+ }else{n.style.display="grid";el("md-auth-error").textContent=message||"";}
+}
+async function call(path,opt){
+ if(!session?.access_token)throw new Error("Sign in to MahiDrive first.");
+ const headers={apikey:C.publishableKey,Authorization:"Bearer "+session.access_token,...(opt?.headers||{})};let body=opt?.body;
+ if(body!==undefined&&!(body instanceof Blob)&&!(body instanceof ArrayBuffer)&&!(body instanceof Uint8Array)){headers["Content-Type"]="application/json";body=JSON.stringify(body);}
+ const r=await fetch(API+"/"+path+(opt?.query||""),{method:opt?.method||"GET",headers,body});
+ if(!r.ok){const data=await r.json().catch(()=>({}));if(r.status===401){await sb.auth.signOut();throw new Error("Session expired. Sign in again.");}throw new Error(data?.error?.message||"MahiDrive API error "+r.status);}
+ return opt?.raw?r:r.status===204?{}:r.json();
+}
+async function accounts(){
+ const r=await call("accounts");
+ A.splice(0,A.length,...(r.accounts||[]).map(a=>{const limit=a.quota_limit_bytes==null?0:Number(a.quota_limit_bytes),used=Number(a.quota_used_bytes||0);return{id:a.id,accountId:a.id,slot:+a.slot,n:"Google Drive "+a.slot,p:"Google Drive",e:a.account_email||"Not connected",email:a.account_email,status:a.status,s:a.status==="connected"?"ok":a.status==="error"||a.status==="reauthorization_required"?"er":"wn",u:gb(used),q:gb(limit),quotaLimitBytes:limit,quotaUsedBytes:used,y:a.quota_checked_at?new Date(a.quota_checked_at).toLocaleString():"Not synced",error:a.last_error_code||""};}));
+ window.syncSq();
+}
+async function files(){
+ const r=await call("files/list"),rows=r.files||[];F.splice(0,F.length);VF.splice(0,VF.length);nid=0;const ids=new Map();
+ rows.forEach(f=>ids.set(f.google_account_id+":"+f.drive_file_id,++nid));
+ rows.forEach(f=>{const key=f.google_account_id+":"+f.drive_file_id,parent=f.parent_drive_file_id?ids.get(f.google_account_id+":"+f.parent_drive_file_id):null,slot=Number(f.account_slot||1);F.push({id:ids.get(key),remoteId:f.drive_file_id,accountId:f.google_account_id,accountSlot:slot,dbId:f.id,n:f.name,t:type(f.mime_type,f.name),mime:f.mime_type,s:Number(f.size_bytes||0)/1048576,d:age(f.modified_at),modifiedAt:f.modified_at,p:parent||null,a:slot-1,st:f.is_starred?1:0,tr:f.is_trashed?1:0});});
+ if(S.cwd&&!F.some(f=>f.id===S.cwd&&f.t==="folder"))S.cwd=null;
+ if(r.accountErrors?.length)toast("Some connected accounts could not sync.");
+}
+async function loadActivity(){const r=await call("activity");ACT.splice(0,ACT.length,...(r.events||[]).map(e=>{const names={google_oauth_started:"Google sign-in started",google_account_connected:"Google Drive account connected",google_account_disconnected:"Google Drive account disconnected",folder_created:"Folder created",file_uploaded:"File uploaded",file_renamed:"File renamed",file_moved:"File moved",file_copied:"File copied",file_trashed:"File moved to trash",file_restored:"File restored",file_deleted_permanently:"File permanently deleted",file_starred:"File starred",file_unstarred:"File unstarred"};const k=e.action||"mod";const t=k.indexOf("upload")>=0?"up":k.indexOf("deleted")>=0||k.indexOf("trashed")>=0?"del":k.indexOf("connected")>=0||k.indexOf("oauth")>=0?"sync":"mod";return[t,names[k]||k.replaceAll("_"," "),new Date(e.created_at).toLocaleString()];}));}
+async function refreshAll(){await accounts();await files();await accounts();await loadActivity();syncSq();draw();}
+function syncSq(){const u=A.reduce((s,a)=>s+a.u,0),c=A.reduce((s,a)=>s+a.q,0);if(el("sqt"))el("sqt").textContent=u.toFixed(2)+" GB";if(el("sqc"))el("sqc").textContent=c?c.toFixed(2)+" GB":"—";if(el("sqb"))el("sqb").style.width=c?Math.min(100,u/c*100)+"%":"0%";const n=document.querySelector(".sq .mu");if(n?.childNodes[0])n.childNodes[0].textContent="Live · ";}
+function H(t,s,a){return hd(t,s,a||"");}
+V.dash=()=>{const u=A.reduce((s,a)=>s+a.u,0),c=A.reduce((s,a)=>s+a.q,0),online=A.filter(a=>a.status==="connected").length,p=c?Math.round(u/c*100):0,recent=F.filter(f=>!f.tr&&f.t!=="folder").sort((a,b)=>a.d-b.d).slice(0,5);
+ return H("Good "+(new Date().getHours()<12?"morning":new Date().getHours()<18?"afternoon":"evening")+", Mahi","Live overview from your Google Drive accounts.")+
+ "<div class='g d1'><div class='cd hero'><div class='ring' style='--p:"+p+"'><div><b style='font-size:22px'>"+u.toFixed(2)+" GB</b><br><span class='mu'>of "+c.toFixed(2)+" GB</span></div></div><div><b>"+Math.max(0,c-u).toFixed(2)+" GB available</b><span class='mu'> · "+p+"% used across "+online+" accounts</span>"+A.map(a=>"<div><div class='fr mu'><span>"+esc(a.n)+"</span><span>"+a.u.toFixed(2)+" / "+a.q.toFixed(2)+" GB</span></div><div class='pb'><i style='width:"+(a.q?Math.min(100,a.u/a.q*100):0)+"%'></i></div></div>").join("")+"</div></div><div class='cd'><h3>Storage health</h3><div class='sr'><span>Connected accounts</span><b>"+online+" / 5</b></div><div class='sr'><span>Indexed files</span><b>"+F.filter(f=>!f.tr).length+"</b></div><p class='mu'>Quota is read from Google; independent accounts do not form a pooled Google Drive quota.</p></div></div><div class='sec'>Recent files <button class='mu' onclick=\"go('recent')\">View all</button></div>"+(recent.length?recent.map(row).join(""):empty("No files synced","Connect a Google Drive account to start."))+"<div class='sec'>Google Drive accounts <button class='mu' onclick=\"go('accounts')\">Manage</button></div><div class='g g2'>"+A.map(a=>"<div class='cd'><b>"+esc(a.n)+"</b><div class='mu'>"+esc(a.email||"Not connected")+"</div><span class='pl "+(a.status==="connected"?"ok":"wn")+"'>"+esc(a.status)+"</span></div>").join("")+"</div>";};
+V.accounts=()=>{const count=A.filter(a=>a.status==="connected").length;return H("Cloud accounts",count+" of 5 Google Drive accounts connected.","<button class='b' onclick='refreshAll()'>"+I("refresh",15)+"Refresh</button>")+
+ "<div class='note'>Each account remains independent. OAuth starts with drive.file: MahiDrive can manage files it creates or files explicitly selected using Google Picker. Existing full-drive browsing is not enabled yet.</div><div class='g g2'>"+
+ A.map(a=>"<div class='cd'><div class='fr' style='margin-bottom:12px'><div class='nm'><div class='av'>"+a.slot+"</div><div><b>"+esc(a.n)+"</b><div class='mu'>"+esc(a.email||"No account connected")+"</div></div></div><span class='pl "+(a.status==="connected"?"ok":a.status==="error"||a.status==="reauthorization_required"?"er":"wn")+"'>"+esc(a.status)+"</span></div><div class='fr mu'><span>"+(a.q?a.u.toFixed(2)+" GB used":"Quota unavailable")+"</span><span>"+(a.q?Math.max(0,a.q-a.u).toFixed(2)+" GB free":"—")+"</span></div><div class='pb' style='margin:6px 0 10px'><i style='width:"+(a.q?Math.min(100,a.u/a.q*100):0)+"%'></i></div><div class='mu'>"+(a.q?"Quota "+a.q.toFixed(2)+" GB · "+esc(a.y):"Connect to read live quota.")+"</div><div class='ac' style='justify-content:flex-start'><button class='b p' onclick='connectSlot("+a.slot+")'>"+I("cloud",15)+(a.status==="connected"?"Reconnect":"Connect Google")+"</button>"+(a.status==="connected"?"<button class='b' onclick='browseSlot("+a.slot+")'>Browse</button><button class='b d' onclick='disconnectSlot("+a.slot+")'>Disconnect</button>":"")+"</div></div>").join("")+
+ "</div><div class='ac' style='justify-content:flex-start'><button class='b p' onclick='addAcct()'>"+I("plus",15)+"Connect next Google account</button></div>";};
+V.storage=()=>{const u=A.reduce((s,a)=>s+a.u,0),c=A.reduce((s,a)=>s+a.q,0),g={};F.filter(f=>!f.tr&&f.t!=="folder").forEach(f=>g[f.t]=(g[f.t]||0)+f.s);return H("Storage","Live Google Drive quota and indexed files.")+"<div class='g g2'><div class='cd'><div class='mu'>Total capacity</div><h1>"+c.toFixed(2)+" GB</h1></div><div class='cd'><div class='mu'>Used</div><h1>"+u.toFixed(2)+" GB</h1></div><div class='cd'><div class='mu'>Available</div><h1>"+Math.max(0,c-u).toFixed(2)+" GB</h1></div></div><div class='cd' style='margin-top:14px'><h3>Indexed size by type</h3>"+(Object.keys(g).length?Object.entries(g).sort((a,b)=>b[1]-a[1]).map(x=>"<div class='sr'><span>"+esc(x[0])+"</span><b>"+(x[1]/1024).toFixed(2)+" GB</b></div>").join(""):"<p class='mu'>No file metadata indexed.</p>")+"</div><div class='cd' style='margin-top:14px'><h3>Independent account quotas</h3>"+A.map(a=>"<div class='sr'><span>"+esc(a.n)+" · "+esc(a.email||"Not connected")+"</span><b>"+(a.q?a.u.toFixed(2)+" / "+a.q.toFixed(2)+" GB":"Not connected")+"</b></div>").join("")+"</div>";};
+V.uploads=()=>{const list=U.filter(u=>u.liveTask);const groups=(label,items)=>items.length?"<div class='sec'>"+label+" ("+items.length+")</div>"+items.map(u=>"<div class='cd' style='margin-bottom:10px'><div class='fr'><div><b>"+esc(u.n)+"</b><div class='mu'>"+esc(u.message||u.st)+"</div></div><span class='pl "+(u.st==="done"?"ok":u.st==="fail"?"er":"wn")+"'>"+u.p+"%</span></div><div class='pb' style='margin-top:8px'><i style='width:"+u.p+"%'></i></div></div>").join(""):"";return H("Upload center","Resumable uploads to Google Drive.","<button class='b p' onclick=\"document.getElementById('fi').click()\">"+I("upload",15)+"Upload files</button>")+"<div class='note'>MahiDrive chooses an account with enough available quota. Success is shown after Google confirms the upload and the file is indexed.</div>"+groups("In progress",list.filter(u=>u.st==="live"))+groups("Failed",list.filter(u=>u.st==="fail"))+groups("Completed",list.filter(u=>u.st==="done"))+(!list.length?empty("No uploads yet","Choose Upload files to start."): "");};
+V.activity=()=>H("Activity","Recent owner-only actions recorded by the server.")+"<div class='cd'><div class='tl'>"+(ACT.length?ACT.map(actRow).join(""):"<p class='mu'>No activity recorded yet.</p>")+"</div></div>";
+V.security=()=>H("Security Center","Owner-only status and protections.")+"<div class='g g2'><div class='cd'><h3>Identity</h3><div class='sr'><span>Signed in as</span><b>"+esc(session?.user?.email)+"</b></div><div class='sr'><span>Owner check</span><span class='pl ok'>Verified</span></div><div class='sr'><span>App sign-up flow</span><span class='pl ok'>Not provided</span></div></div><div class='cd'><h3>Google account security</h3><div class='sr'><span>Connected accounts</span><b>"+A.filter(a=>a.status==="connected").length+" / 5</b></div><div class='sr'><span>Refresh tokens</span><span class='pl ok'>Encrypted server-side</span></div><div class='sr'><span>Google scope</span><span class='pl wn'>drive.file</span></div><p class='mu'>The browser never receives Google refresh tokens or Supabase secret keys.</p></div></div><div class='cd' style='margin-top:14px'><h3>Owner session</h3><button class='b d' onclick='ownerSignOut()'>Sign out</button></div>";
+V.vault=()=>H("Private vault","The demo PIN vault is disabled because it did not encrypt file contents.")+"<div class='note'>A secure encrypted vault and recovery flow are not implemented.</div>"+empty("Vault unavailable","Use a private folder in Google Drive for now.");
+V.shared=()=>H("Private storage","Public sharing, guests and teams are disabled.")+"<div class='note'>MahiDrive is designed for one owner only.</div>";
+V.settings=()=>H("Settings","Backend and account.")+"<div class='cd'><div class='sr'><b>Supabase</b><span class='pl ok'>Connected</span></div><div class='sr'><b>Owner</b><span>"+esc(C.ownerEmail)+"</span></div><div class='sr'><b>Google accounts</b><button class='b' onclick=\"go('accounts')\">Manage</button></div><div class='sr'><b>Refresh live data</b><button class='b' onclick='refreshAll()'>Refresh</button></div><div class='sr'><b>Sign out</b><button class='b d' onclick='ownerSignOut()'>Sign out</button></div></div>";
+window.refreshAll=refreshAll;window.syncSq=syncSq;
+window.connectSlot=async slot=>{try{const r=await call("oauth/start",{method:"POST",body:{slot}});location.assign(r.authorizationUrl);}catch(e){toast(say(e));}};
+window.disconnectSlot=slot=>ask("Disconnect Google Drive "+slot+"?","The OAuth token will be revoked and removed. Files stored in Google Drive will not be deleted.",async()=>{try{await call("accounts/disconnect",{method:"POST",body:{slot}});await refreshAll();toast("Google Drive disconnected.");}catch(e){toast(say(e));}},"Disconnect");
+window.browseSlot=slot=>{const a=A.find(x=>x.slot===slot);S.cwd=null;S.accountFilter=a?.id||null;window.__mdBrowse=true;originalGo("files");};
+const originalItems=window.items,originalGo=window.go;
+window.items=()=>{const list=originalItems();return S.accountFilter?list.filter(f=>f.accountId===S.accountFilter):list;};
+window.go=v=>{if(v==="files"&&!window.__mdBrowse)S.accountFilter=null;window.__mdBrowse=false;originalGo(v);};
+window.ownerSignOut=async()=>{await sb.auth.signOut();location.reload();};
+window.addAcct=()=>{const a=A.find(x=>x.status!=="connected");if(a)connectSlot(a.slot);else toast("All five Google Drive slots are connected.");};
+window.newFolder=()=>{const active=A.filter(a=>a.status==="connected");if(!active.length)return toast("Connect Google Drive first.");modal("<h3>Create Google Drive folder</h3><label class='mu'>Account</label><select id='md-folder-account' style='width:100%'>"+active.map(a=>"<option value='"+esc(a.id)+"'>"+esc(a.n)+" · "+esc(a.email)+"</option>").join("")+"</select><label class='mu'>Folder name</label><input id='md-folder-name' type='text' placeholder='New folder'><div class='ac'><button class='b' onclick='closeM()'>Cancel</button><button class='b p' id='md-folder-create'>Create folder</button></div>");el("md-folder-create").onclick=async()=>{const accountId=el("md-folder-account").value,name=el("md-folder-name").value.trim(),folder=S.cwd?gf(S.cwd):null,parentId=folder?.accountId===accountId?folder.remoteId:null;if(!name)return toast("Enter a folder name.");try{await call("files/create-folder",{method:"POST",body:{accountId,name,parentId}});closeM();await files();go("files");toast("Folder created.");}catch(e){toast(say(e));}};};
+window.preview=async id=>window.act("dl",id);
+const originalAct=window.act;
+window.act=async(action,id,q)=>{
+ const f=gf(id);if(!f?.remoteId||!f.accountId)return originalAct(action,id,q);const base={accountId:f.accountId,fileId:f.remoteId};
+ try{
+  if(action==="open"){if(f.t==="folder")return originalAct(action,id,q);return window.preview(id);}
+  if(action==="vlt"||action==="unv")return toast("Vault is disabled until encryption and recovery are implemented.");
+  if(action==="star"){await call("files/star",{method:"POST",body:{...base,starred:!f.st}});f.st=f.st?0:1;draw();return;}
+  if(action==="ren")return prompt2("Rename",f.n,async name=>{try{await call("files/rename",{method:"POST",body:{...base,name}});await files();draw();toast("Renamed in Google Drive.");}catch(e){toast(say(e));}});
+  if(action==="mv"){window.__mdMoveId=id;const folders=F.filter(x=>x.t==="folder"&&!x.tr&&x.accountId===f.accountId&&x.id!==id);return modal("<h3>Move “"+esc(f.n)+"”</h3><select id='md-move-parent' style='width:100%'><option value=''>My Drive root</option>"+folders.map(x=>"<option value='"+esc(x.remoteId)+"'>"+esc(x.n)+"</option>").join("")+"</select><div class='ac'><button class='b' onclick='closeM()'>Cancel</button><button class='b p' id='md-move-confirm'>Move</button></div>");}
+  if(action==="cp"){await call("files/copy",{method:"POST",body:base});await files();draw();return toast("File copied.");}
+  if(action==="dl"){const r=await call("files/download",{method:"GET",query:"?accountId="+encodeURIComponent(f.accountId)+"&fileId="+encodeURIComponent(f.remoteId),raw:true});const u=URL.createObjectURL(await r.blob()),a=document.createElement("a");a.href=u;a.download=f.n;a.click();setTimeout(()=>URL.revokeObjectURL(u),60000);return;}
+  if(action==="del"){await call("files/trash",{method:"POST",body:base});await files();draw();return toast("Moved to Google Drive trash.");}
+  if(action==="rest"){await call("files/restore",{method:"POST",body:base});await files();draw();return toast("Restored in Google Drive.");}
+  if(action==="purge")return ask("Permanently delete this file?","This deletes the file from Google Drive and cannot be undone.",async()=>{try{await call("files/delete",{method:"POST",body:base});await files();draw();toast("Permanently deleted.");}catch(e){toast(say(e));}},"Delete permanently");
+ }catch(e){toast(say(e));}
+};
+document.addEventListener("click",async e=>{if(e.target?.id==="md-move-confirm"){const f=gf(window.__mdMoveId);if(!f)return;try{await call("files/move",{method:"POST",body:{accountId:f.accountId,fileId:f.remoteId,parentId:el("md-move-parent").value||null}});closeM();await files();draw();toast("File moved.");}catch(err){toast(say(err));}}});
+window.addU=async fileList=>{
+ const queue=[...fileList];for(const file of queue){
+  const folder=S.cwd?gf(S.cwd):null,choices=A.filter(a=>a.status==="connected"&&a.quotaLimitBytes>0&&a.quotaLimitBytes-a.quotaUsedBytes>=file.size).sort((a,b)=>(b.quotaLimitBytes-b.quotaUsedBytes)-(a.quotaLimitBytes-a.quotaUsedBytes));
+  let target=folder?.accountId?choices.find(a=>a.id===folder.accountId):null;target=target||choices[0];if(!target){toast("No connected Google account has enough known free quota for "+file.name);continue;}
+  const task={n:file.name,s:file.size/1048576,p:0,st:"live",a:target.slot-1,message:"Starting upload…",liveTask:true};U.push(task);if(S.v==="uploads")draw();
+  try{
+   const start=await call("files/upload-session",{method:"POST",body:{accountId:target.id,name:file.name,size:file.size,mimeType:file.type||"application/octet-stream",parentId:folder?.accountId===target.id?folder.remoteId:null}});
+   const chunkSize=8*1024*1024;let id=null;
+   if(!file.size){const r=await call("files/upload-chunk",{method:"POST",headers:{"x-mahidrive-account-id":target.id,"x-mahidrive-upload-session":start.sessionUrl,"Content-Range":"bytes */0"},body:new Uint8Array(0)});id=r.file?.id||null;task.p=100;}
+   else for(let pos=0;pos<file.size;pos+=chunkSize){const end=Math.min(pos+chunkSize,file.size)-1,r=await call("files/upload-chunk",{method:"POST",headers:{"x-mahidrive-account-id":target.id,"x-mahidrive-upload-session":start.sessionUrl,"Content-Range":"bytes "+pos+"-"+end+"/"+file.size,"Content-Type":file.type||"application/octet-stream"},body:file.slice(pos,end+1)});task.p=Math.round((end+1)/file.size*100);task.message="Uploading to "+target.n;if(r.file?.id)id=r.file.id;if(S.v==="uploads")draw();}
+   if(!id)throw new Error("Google Drive did not confirm the completed upload.");await call("files/register",{method:"POST",body:{accountId:target.id,fileId:id}});task.p=100;task.st="done";task.message="Uploaded and indexed";await files();await accounts();if(S.v!=="uploads")draw();toast(file.name+" uploaded to "+target.n);
+  }catch(err){task.st="fail";task.message=say(err);if(S.v==="uploads")draw();toast("Upload failed: "+say(err));}
+ }
+ if(el("fi"))el("fi").value="";
+};
+function authRedirectError(){
+ const p=new URLSearchParams(location.search),h=new URLSearchParams(location.hash.replace(/^#/,""));
+ const code=p.get("error_code")||p.get("error")||h.get("error_code")||h.get("error");
+ const description=p.get("error_description")||h.get("error_description");
+ if(!code&&!description)return "";
+ history.replaceState({},document.title,location.origin+location.pathname);
+ return description||code||"The sign-in link could not be verified. Request a new link.";
+}
+async function boot(candidateSession=null){
+ if(booted||booting)return;booting=true;
+ gate("");
+ try{
+  const {data,error}=await sb.auth.getSession();if(error)throw error;
+  session=candidateSession||authSession||data.session;
+  if(!session){gate(authRedirectError());return;}
+  const health=await call("health");if(!health.ok||String(health.owner||"").toLowerCase()!==C.ownerEmail.toLowerCase())throw new Error("This sign-in is not authorized as the MahiDrive Owner.");
+  el("md-auth")?.remove();el("app").style.display="";
+  U.splice(0,U.length);ACT.splice(0,ACT.length);await accounts();await files();await accounts();await loadActivity();syncSq();draw();
+  const qp=new URLSearchParams(location.search),result=qp.get("mahidrive_oauth"),slot=qp.get("slot");if(result)history.replaceState({},document.title,location.origin+location.pathname+location.hash);
+  if(result==="connected")toast("Google Drive slot "+slot+" connected.");else if(result==="error")toast("Google authorization was cancelled or failed.");
+  booted=true;
+ }catch(e){await sb.auth.signOut().catch(()=>{});session=null;gate(say(e));}
+ finally{booting=false;}
+}
+sb.auth.onAuthStateChange((_event,s)=>{
+ authSession=s;session=s;
+ if(s&&!booted&&!booting)setTimeout(()=>{if(!booted&&!booting)boot(s).catch(e=>gate(say(e)));},0);
+ else if(s&&booted)refreshAll().catch(e=>toast(say(e)));
+ else if(!s&&booted)gate("Signed out. Sign in with the Owner email to continue.");
+});
+setTimeout(()=>boot().catch(e=>gate(say(e))),0);
+})();

@@ -1,0 +1,34 @@
+name: MahiDrive static checks
+
+on:
+  push:
+    branches:
+      - main
+      - chore/mahidrive-foundation-config
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check browser scripts
+        run: |
+          node --check mahidrive-config.js
+          node --check mahidrive-app.js
+      - name: Verify HTML integration
+        run: |
+          grep -q 'supabase.min.js' MahiDrive.html
+          grep -q 'mahidrive-config.js' MahiDrive.html
+          grep -q 'mahidrive-app.js' MahiDrive.html
+          grep -q 'verifyOwner' mahidrive-app.js || grep -q 'health' mahidrive-app.js
