@@ -2,7 +2,7 @@
 "use strict";
 const C=window.MAHIDRIVE_CONFIG, BASE=C.supabaseUrl.replace(/\/+$/,""), API=BASE+"/functions/v1/"+C.edgeFunction;
 const sb=window.supabase.createClient(BASE,C.publishableKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce"}});
-let session=null,booted=false,booting=false,busy=false;
+let session=null,authSession=null,booted=false,booting=false,busy=false;
 const el=id=>document.getElementById(id), esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const gb=n=>Number(n||0)/(1024**3), age=d=>Math.max(0,(Date.now()-new Date(d||Date.now()).getTime())/86400000);
 const type=(m,n)=>m==="application/vnd.google-apps.folder"?"folder":/^image\//i.test(m)||/\.(jpe?g|png|gif|webp|heic)$/i.test(n)?"img":/^video\//i.test(m)||/\.(mp4|mov|mkv|webm)$/i.test(n)?"vid":/^audio\//i.test(m)||/\.(mp3|wav|flac|m4a)$/i.test(n)?"aud":m==="application/pdf"||/\.pdf$/i.test(n)?"pdf":/spreadsheet|excel|csv/i.test(m)||/\.(xlsx?|csv)$/i.test(n)?"xls":/presentation|powerpoint/i.test(m)||/\.(pptx?)$/i.test(n)?"ppt":/wordprocessing|msword/i.test(m)||/\.(docx?)$/i.test(n)?"doc":/zip|compressed/i.test(m)||/\.(zip|rar|7z)$/i.test(n)?"zip":/javascript|json|text\/|xml/i.test(m)||/\.(js|ts|py|html|css|md|txt|json)$/i.test(n)?"code":"oth";
@@ -14,7 +14,7 @@ function gate(message){
  n.innerHTML="<style>#md-auth{position:fixed;inset:0;z-index:99999;display:grid;place-items:center;padding:20px;background:radial-gradient(800px 500px at 80% 0,rgba(124,92,255,.22),transparent),#08080c;color:#f5f5fa;font:14px/1.5 Inter,system-ui}#md-auth .card{width:min(440px,100%);padding:28px;border:1px solid #30303b;border-radius:22px;background:#14141b;box-shadow:0 24px 80px #0008}#md-auth .logo{width:42px;height:42px;border-radius:13px;background:linear-gradient(135deg,#7c5cff,#2fd4e0);display:grid;place-items:center;font-size:21px;font-weight:800;margin-bottom:22px}#md-auth h1{font-size:25px;margin:0 0 6px}#md-auth p{color:#a2a2b0;margin:4px 0 18px}#md-auth label{display:block;color:#c8c8d3;margin:14px 0 6px}#md-auth input{width:100%;height:46px;padding:0 13px;border-radius:11px;border:1px solid #3b3b48;background:#0e0e14;color:#fff;font:inherit}#md-auth button{width:100%;height:46px;margin-top:16px;border:0;border-radius:11px;background:linear-gradient(135deg,#7c5cff,#4f8cff);color:white;font:600 14px Inter;cursor:pointer}#md-auth button:disabled{opacity:.5}#md-auth .err{color:#ff9298;min-height:20px;font-size:12px}#md-auth .foot{font-size:12px;margin-top:14px;color:#898998}</style><div class='card'><div class='logo'>M</div><h1>Welcome to MahiDrive</h1><p>Private cloud storage · Owner access only</p><form id='md-login'><label>Owner email</label><input id='md-email' type='email' readonly required><button id='md-login-btn'>Send secure sign-in link</button><div class='err' id='md-auth-error' role='status'></div></form><div class='foot'>Only the configured Owner account can enter. This app does not provide a public signup flow.</div></div>";
  document.body.append(n);el("md-email").value=C.ownerEmail;
  el("md-login").addEventListener("submit",async ev=>{ev.preventDefault();if(busy)return;busy=true;const b=el("md-login-btn");b.disabled=true;b.textContent="Sending sign-in link…";el("md-auth-error").textContent="";
- try{const email=el("md-email").value.trim().toLowerCase();if(email!==C.ownerEmail.toLowerCase())throw new Error("This is not the configured Owner.");const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname,shouldCreateUser:false}});if(error)throw error;el("md-auth-error").textContent="Sign-in link sent. Open your email and return here.";b.textContent="Link sent";}
+ try{const email=el("md-email").value.trim().toLowerCase();if(email!==C.ownerEmail.toLowerCase())throw new Error("This is not the configured Owner.");const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:"https://mahidrive-ui.onrender.com/MahiDrive.html",shouldCreateUser:false}});if(error)throw error;el("md-auth-error").textContent="Sign-in link sent. Open your email and return here.";b.textContent="Link sent";}
  catch(e){el("md-auth-error").textContent=say(e);b.disabled=false;b.textContent="Send secure sign-in link";}finally{busy=false;}});
  }else{n.style.display="grid";el("md-auth-error").textContent=message||"";}
 }
@@ -99,11 +99,21 @@ window.addU=async fileList=>{
  }
  if(el("fi"))el("fi").value="";
 };
-async function boot(){
+function authRedirectError(){
+ const p=new URLSearchParams(location.search),h=new URLSearchParams(location.hash.replace(/^#/,""));
+ const code=p.get("error_code")||p.get("error")||h.get("error_code")||h.get("error");
+ const description=p.get("error_description")||h.get("error_description");
+ if(!code&&!description)return "";
+ history.replaceState({},document.title,location.origin+location.pathname);
+ return description||code||"The sign-in link could not be verified. Request a new link.";
+}
+async function boot(candidateSession=null){
  if(booted||booting)return;booting=true;
  gate("");
  try{
-  const {data,error}=await sb.auth.getSession();if(error)throw error;session=data.session;if(!session)return;
+  const {data,error}=await sb.auth.getSession();if(error)throw error;
+  session=candidateSession||authSession||data.session;
+  if(!session){gate(authRedirectError());return;}
   const health=await call("health");if(!health.ok||String(health.owner||"").toLowerCase()!==C.ownerEmail.toLowerCase())throw new Error("This sign-in is not authorized as the MahiDrive Owner.");
   el("md-auth")?.remove();el("app").style.display="";
   U.splice(0,U.length);ACT.splice(0,ACT.length);await accounts();await files();await accounts();await loadActivity();syncSq();draw();
@@ -113,6 +123,11 @@ async function boot(){
  }catch(e){await sb.auth.signOut().catch(()=>{});session=null;gate(say(e));}
  finally{booting=false;}
 }
-sb.auth.onAuthStateChange((_event,s)=>{session=s;if(s&&!booted&&!booting)boot().catch(e=>gate(say(e)));else if(s&&booted)refreshAll().catch(e=>toast(say(e)));else if(!s&&booted)gate("Signed out. Sign in with the Owner email to continue.");});
-setTimeout(boot,0);
+sb.auth.onAuthStateChange((_event,s)=>{
+ authSession=s;session=s;
+ if(s&&!booted&&!booting)setTimeout(()=>{if(!booted&&!booting)boot(s).catch(e=>gate(say(e)));},0);
+ else if(s&&booted)refreshAll().catch(e=>toast(say(e)));
+ else if(!s&&booted)gate("Signed out. Sign in with the Owner email to continue.");
+});
+setTimeout(()=>boot().catch(e=>gate(say(e))),0);
 })();
