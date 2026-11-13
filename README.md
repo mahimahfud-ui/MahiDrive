@@ -8,6 +8,8 @@
 - Owner identity: `mahimahfud@gmail.com` (Supabase Auth user confirmed and linked)
 - Private database schema: `mahidrive`, with RLS enabled and browser roles denied direct table access
 - Five Google Drive connection slots are pre-created and currently disconnected
+- Applied database migrations are checked into `supabase/migrations/` with their original version identifiers
+- Supabase CLI configuration records the Edge Function callback's custom JWT validation mode
 - Owner-only Supabase Edge Function: `mahidrive-api` (deployed version 4)
 
 MahiDrive is separate from Mahi-Repair and MahiCloud.
