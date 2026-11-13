@@ -10,7 +10,7 @@
 - Five Google Drive connection slots are pre-created and currently disconnected
 - Applied database migrations are checked into `supabase/migrations/` with their original version identifiers
 - Supabase CLI configuration records the Edge Function callback's custom JWT validation mode
-- Owner-only Supabase Edge Function: `mahidrive-api` (deployed version 4)
+- Owner-only Supabase Edge Function: `mahidrive-api` (deployed version 5)
 
 MahiDrive is separate from Mahi-Repair and MahiCloud.
 
