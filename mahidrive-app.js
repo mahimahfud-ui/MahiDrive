@@ -2,7 +2,7 @@
 "use strict";
 const C=window.MAHIDRIVE_CONFIG, BASE=C.supabaseUrl.replace(/\/+$/,""), API=BASE+"/functions/v1/"+C.edgeFunction;
 const sb=window.supabase.createClient(BASE,C.publishableKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,flowType:"pkce"}});
-let session=null,booted=false,busy=false;
+let session=null,booted=false,booting=false,busy=false;
 const el=id=>document.getElementById(id), esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const gb=n=>Number(n||0)/(1024**3), age=d=>Math.max(0,(Date.now()-new Date(d||Date.now()).getTime())/86400000);
 const type=(m,n)=>m==="application/vnd.google-apps.folder"?"folder":/^image\//i.test(m)||/\.(jpe?g|png|gif|webp|heic)$/i.test(n)?"img":/^video\//i.test(m)||/\.(mp4|mov|mkv|webm)$/i.test(n)?"vid":/^audio\//i.test(m)||/\.(mp3|wav|flac|m4a)$/i.test(n)?"aud":m==="application/pdf"||/\.pdf$/i.test(n)?"pdf":/spreadsheet|excel|csv/i.test(m)||/\.(xlsx?|csv)$/i.test(n)?"xls":/presentation|powerpoint/i.test(m)||/\.(pptx?)$/i.test(n)?"ppt":/wordprocessing|msword/i.test(m)||/\.(docx?)$/i.test(n)?"doc":/zip|compressed/i.test(m)||/\.(zip|rar|7z)$/i.test(n)?"zip":/javascript|json|text\/|xml/i.test(m)||/\.(js|ts|py|html|css|md|txt|json)$/i.test(n)?"code":"oth";
@@ -100,6 +100,7 @@ window.addU=async fileList=>{
  if(el("fi"))el("fi").value="";
 };
 async function boot(){
+ if(booted||booting)return;booting=true;
  gate("");
  try{
   const {data,error}=await sb.auth.getSession();if(error)throw error;session=data.session;if(!session)return;
@@ -110,7 +111,8 @@ async function boot(){
   if(result==="connected")toast("Google Drive slot "+slot+" connected.");else if(result==="error")toast("Google authorization was cancelled or failed.");
   booted=true;
  }catch(e){await sb.auth.signOut().catch(()=>{});session=null;gate(say(e));}
+ finally{booting=false;}
 }
-sb.auth.onAuthStateChange((_event,s)=>{session=s;if(s&&booted)refreshAll().catch(e=>toast(say(e)));else if(!s&&booted)gate("Signed out. Sign in with the Owner email to continue.");});
+sb.auth.onAuthStateChange((_event,s)=>{session=s;if(s&&!booted&&!booting)boot().catch(e=>gate(say(e)));else if(s&&booted)refreshAll().catch(e=>toast(say(e)));else if(!s&&booted)gate("Signed out. Sign in with the Owner email to continue.");});
 setTimeout(boot,0);
 })();
